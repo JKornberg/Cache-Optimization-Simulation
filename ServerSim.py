@@ -96,6 +96,7 @@ x,y = zip(*files.items()) #I think we should use a different structure than
 y1 = []                   #a dict, it's just a bit awkward to work with
 for i in range(numberOfFiles-1):
     y1.append(y[i][0])
+y1.sort()
 plt.plot(x,y1)
 #Oh no. What's wrong here?
 #My first run through has a weird spike at 8000?
