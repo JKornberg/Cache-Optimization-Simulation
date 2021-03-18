@@ -79,17 +79,14 @@ a = 2
 b = 1/2
 for i in range(numberOfFiles-1):
     q.append((np.random.pareto(a) + 1) * b)
+probSum = sum(q)
+fileProbabilities = np.array(q)/probSum
 for i in range(numberOfFiles-1):
     fileSize = (np.random.pareto(a) + 1) * b
-    probSum = sum(q)
-    fileProbability = q[i]/(probSum-q[i])
-    files[i] = (fileSize,fileProbability)
+    files[i] = (fileSize,fileProbabilities[i])
 
 #Is the sum of probabilities 1?
-x = 0
-for i in range(numberOfFiles-1):
-    x += files[i][1]
-print(x)
+print(sum(fileProbabilities))
 
 #Let's graph the file sizes just to take a look
 x,y = zip(*files.items()) #I think we should use a different structure than
@@ -97,10 +94,8 @@ y1 = []                   #a dict, it's just a bit awkward to work with
 for i in range(numberOfFiles-1):
     y1.append(y[i][0])
 y1.sort()
-plt.plot(x,y1)
-#Oh no. What's wrong here?
-#My first run through has a weird spike at 8000?
-#No idea why but definitely not pareto
+#plt.plot(x,y1)
+plt.hist(y1,bins=1000)
 
 #e1 = Event(0.5,1,1)
 #queue.put((e1.time,e1))
