@@ -11,7 +11,7 @@ Created on Wed Mar 17 19:13:01 2021
 
 import numpy as np
 import matplotlib.pyplot as plt
-from queue import PriorityQueue
+from queue import Queue, PriorityQueue
 #from enum import Enum
 
 #First in first out
@@ -22,7 +22,7 @@ def getFileSize(a,m):
     return (np.random.pareto(a) + 1) * m
 
 def generateRequests(mean, n):
-    #Returns structure of 
+    #Returns structure of
     return np.random.poisson(mean,n)
 
 #Generate files
@@ -36,29 +36,61 @@ class RoundTrip:
     def addTask(size):
         if free < size:
 '''
-
+        
+class Cache:
+    fileIds = set() # list of fileIds
+    used = 0
+    cacheQueue = Queue() # queue of (fileId,fileSize)
+    def __init__(self,eventQueue,size):
+        self.eventQueue = eventQueue
+        self.size = size
+    
+    def checkCache(self,fileId,fileSize,time):
+        if fileId in self.fileIds:
+            eventQueue.add(Received(time,time+fileSize/roundTripTime))
+        else:
+            #Generate arrive at queue event
+            eventQueue.add(ArriveFIFO(time+400,fileId,fileSize))
+            #self.insert(self,fileId,fileSize)
+            
+    def insert(self,fileId,fileSize):
+        while(self.used + fileSize > self.size):
+            removed = self.cacheQueue.pop()
+            self.used -= removed[1]
+            self.fileIds.remove(removed[0])
+        self.fileIds.add(fileId)
+        self.used += fileSize
+        self.cacheQueue.push((fileId,fileSize))
+        
 class Request:
     def __init__(self,time,fileId):
         self.time
         self.fileId = fileId
         
-    def executeRequest(self,time,cache,fileId):
-        queue.add(cache.checkCache(fileId))
+    def execute(self,time,cache,fileId):
+        Queue.add(cache.checkCache(fileId))
+
+class ArriveFIFO:
+    def __init__(self, time, fileId, fileSize):
+        self.time = time
+        self.fileId = fileId
+        self.fileSize = fileSize
+    def execute(self):
+        fifoQueue.push((self.fileId,self.fileSize))
         
-class Cache:
-    fileIds = {}
-    used = 0
-    def __init__(self,queue,size):
-        self.queue = queue
-        self.size = size
-    def checkCache(self,fileId,time):
-        if fileId in self.fileIds:
-            size = files[fileId][0]
-            queue.add(Received(time,time+size/roundTripTime))
+class DepartFIFO:
+    def __init__(self, time, fileId, fileSize):
+        self.time = time
+        self.fileId = fileId
+        self.fileSize = fileSize
+    def execute(self):
+        fifoQueue.pop()
 
 class Received: 
     def __init__(self, requestTime, receiveTime):
-        self.time = receiveTime
+        self.time = receiveTime-requestTime
+    def execute(self):
+        returnTimes.append(self.time)
     
 requests = {} #
 files = {} #key value pairs of {fileId: (fileSize,fileProbability)}
@@ -69,8 +101,10 @@ reqPerSecond = 10
 a, m = 8/7,1/8
 cacheSize = 2000
 roundTripTime = 100
-queue = PriorityQueue()
-cache = Cache(queue,cacheSize)
+eventQueue = PriorityQueue()
+fifoQueue = Queue()
+cache = Cache(eventQueue,cacheSize)
+returnTimes = []
 #r = RoundTrip(roundTripTime)
 
 #Generate fileset
