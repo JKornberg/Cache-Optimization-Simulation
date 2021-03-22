@@ -53,6 +53,7 @@ class Cache:
             #(eventTime, function, (args))
             self.eventQueue.put((time+fileSize/self.institutionSpeed,self.receiver.receivedEvent,(time)))
         else:
+            #Todo: handle full cache
             #Generate arrive at queue event
             self.eventQueue.put((time+400, self.accessLink.arriveFifo,(fileId,fileSize)))
             #self.insert(self,fileId,fileSize)
@@ -83,7 +84,7 @@ class AccessLink:
         self.accessSpeed = settings['accessSpeed']
     def arriveFifo(self,time, requestTime, fileId, fileSize):
         self.fifoQueue.put((fileId, fileSize, requestTime))
-        self.eventQueue.put((time+fileSize/self.accessSpeed, self.departFifo))
+        self.eventQueue.put((time+fileSize/self.accessSpeed, self.departFifo)) #NOTE: this does not include additional arguments
         #TODO: handle when request is in Access Link FIFO
     def departFifo(self,time):
         file = self.fifoQueue.get() #File is (fileId,fileSize,requestTime)
