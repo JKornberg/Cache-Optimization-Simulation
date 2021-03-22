@@ -36,75 +36,85 @@ class RoundTrip:
     def addTask(size):
         if free < size:
 '''
-        
+    
+
 class Cache:
     fileIds = set() # list of fileIds
     used = 0
     cacheQueue = Queue() # queue of (fileId,fileSize)
-    def __init__(self,eventQueue,size):
+    def __init__(self,eventQueue,size, accessLink, receiver, settings):
         self.eventQueue = eventQueue
         self.size = size
-    
+        self.accessLink = accessLink
+        self.receiver = receiver
+        self.institutionSpeed = settings['institutionSpeed']
     def checkCache(self,fileId,fileSize,time):
         if fileId in self.fileIds:
-            eventQueue.add(Received(time,time+fileSize/roundTripTime))
+            #(eventTime, function, (args))
+            self.eventQueue.put((time+fileSize/self.institutionSpeed,self.receiver.receivedEvent,(time)))
         else:
             #Generate arrive at queue event
-            eventQueue.add(ArriveFIFO(time+400,fileId,fileSize))
+            self.eventQueue.put((time+400, self.accessLink.arriveFifo,(fileId,fileSize)))
             #self.insert(self,fileId,fileSize)
             
     def insert(self,fileId,fileSize):
         while(self.used + fileSize > self.size):
-            removed = self.cacheQueue.pop()
+            removed = self.cacheQueue.get()
             self.used -= removed[1]
             self.fileIds.remove(removed[0])
         self.fileIds.add(fileId)
         self.used += fileSize
-        self.cacheQueue.push((fileId,fileSize))
+        self.cacheQueue.put((fileId,fileSize))
         
 class Request:
-    def __init__(self,time,fileId):
-        self.time
-        self.fileId = fileId
-        
-    def execute(self,time,cache,fileId):
-        Queue.add(cache.checkCache(fileId))
+    def __init__(self,cache, eventQueue):
+        self.eventQueue = eventQueue
+        self.cache = cache
+    def addRequest(self,time,fileId):
+        self.eventQueue.put(time, cache.checkCache, (fileId))
 
-class ArriveFIFO:
-    def __init__(self, time, fileId, fileSize):
-        self.time = time
-        self.fileId = fileId
-        self.fileSize = fileSize
-    def execute(self):
-        fifoQueue.push((self.fileId,self.fileSize))
-        
-class DepartFIFO:
-    def __init__(self, time, fileId, fileSize):
-        self.time = time
-        self.fileId = fileId
-        self.fileSize = fileSize
-    def execute(self):
-        fifoQueue.pop()
+class AccessLink:
+    fifoQueue = Queue() # holds (fileId, fileSize, requestTime)
+    def __init__(self,eventQueue, receiver, settings):
+        self.eventQueue = eventQueue
+        self.receiver = receiver
+        self.roundTripSpeed = settings['roundTripSpeed']
+        self.institutionSpeed = settings['institutionSpeed']
+        self.accessSpeed = settings['accessSpeed']
+    def arriveFifo(self,time, requestTime, fileId, fileSize):
+        self.fifoQueue.put((fileId, fileSize, requestTime))
+        self.eventQueue.put((time+fileSize/self.accessSpeed, self.departFifo))
+        #TODO: handle when request is in Access Link FIFO
+    def departFifo(self,time):
+        file = self.fifoQueue.get() #File is (fileId,fileSize,requestTime)
+        requestTime = file[2]
+        receiveTime = time + fileSize/self.institutionSpeed
+        self.eventQueue.put((receiveTime, self.receiver.receivedEvent, (requestTime)))
 
-class Received: 
-    def __init__(self, requestTime, receiveTime):
-        self.time = receiveTime-requestTime
-    def execute(self):
-        returnTimes.append(self.time)
+class Receiver: 
+    def __init__(self, results):
+        self.results = results
+    def receivedEvent(self,time,requestTime):
+        self.results.append((requestTime,time))
     
 requests = {} #
 files = {} #key value pairs of {fileId: (fileSize,fileProbability)}
+results = [] #list of request, completed pairs
+
+
+    
 
 #Variables
 numberOfFiles = 10000
 reqPerSecond = 10
 a, m = 8/7,1/8
 cacheSize = 2000
-roundTripTime = 100
+results = []
+settings = {'roundTripTime' : 400, 'institutionSpeed': 100, 'accessSpeed' : 15}
+receiver = Receiver(results)
 eventQueue = PriorityQueue()
-fifoQueue = Queue()
-cache = Cache(eventQueue,cacheSize)
-returnTimes = []
+accessLink = AccessLink(eventQueue,receiver, settings)
+cache = Cache(eventQueue,cacheSize,accessLink,receiver, settings)
 #r = RoundTrip(roundTripTime)
 
 #Generate fileset
@@ -138,3 +148,13 @@ plt.hist(y1,bins=1000)
 #queue.put((e2.time,e2))
 
 #queue.get()
+
+
+def processQueue():
+    event = eventQueue.get()
+    time = event[0]
+    fun = event[1]
+    if (len(event) > 2):
+        fun(time, *event[2]) 
+    else:
+        fun(time)
