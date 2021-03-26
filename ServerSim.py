@@ -87,6 +87,8 @@ class AccessLink:
         #TODO: handle when request is in Access Link FIFO
     def departFifo(self,time):
         file = self.fifoQueue.get() #File is (fileId,fileSize,requestTime)
+        #TODO: insert file into cache
+        #Do we want to get cache access in here?
         requestTime = file[2]
         receiveTime = time + fileSize/self.institutionSpeed
         self.eventQueue.put((receiveTime, self.receiver.receivedEvent, (requestTime)))
