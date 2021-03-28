@@ -11,7 +11,8 @@ Created on Wed Mar 17 19:13:01 2021
 
 import numpy as np
 import matplotlib.pyplot as plt
-from queue import Queue, PriorityQueue
+from queue import PriorityQueue
+from collections import deque
 #from enum import Enum
 
 #First in first out
@@ -21,9 +22,9 @@ from queue import Queue, PriorityQueue
 def getFileSize(a,m):
     return (np.random.pareto(a) + 1) * m
 
-def generateRequests(mean, n):
+def generateRequest(mean):
     #Returns structure of
-    return np.random.poisson(mean,n)
+    return np.random.poisson(mean)
 
 #Generate files
 
@@ -48,14 +49,15 @@ class Cache:
         self.accessLink = accessLink
         self.receiver = receiver
         self.institutionSpeed = settings['institutionSpeed']
-    def checkCache(self,fileId,fileSize,time):
+        self.roundTripTime = settings['roundTripTime']
+    def checkCache(self,time,fileId,fileSize):
         if fileId in self.fileIds:
             #(eventTime, function, (args))
             self.eventQueue.put((time+fileSize/self.institutionSpeed,self.receiver.receivedEvent,(time)))
         else:
             #Todo: handle full cache
             #Generate arrive at queue event
-            self.eventQueue.put((time+400, self.accessLink.arriveFifo,(fileId,fileSize)))
+            self.eventQueue.put((time+self.roundTripTime, self.accessLink.arriveFifo,(time, fileId,fileSize)))
             #self.insert(self,fileId,fileSize)
             
     def insert(self,fileId,fileSize):
@@ -66,31 +68,29 @@ class Cache:
         self.fileIds.add(fileId)
         self.used += fileSize
         self.cacheQueue.put((fileId,fileSize))
-        
-class Request:
-    def __init__(self,cache, eventQueue):
-        self.eventQueue = eventQueue
-        self.cache = cache
-    def addRequest(self,time,fileId):
-        self.eventQueue.put(time, cache.checkCache, (fileId))
 
 class AccessLink:
-    fifoQueue = Queue() # holds (fileId, fileSize, requestTime)
+    fifoQueue = deque() # holds (fileId, fileSize, requestTime)
     def __init__(self,eventQueue, receiver, settings):
         self.eventQueue = eventQueue
         self.receiver = receiver
-        self.roundTripSpeed = settings['roundTripSpeed']
+        self.roundTripTime = settings['roundTripTime']
         self.institutionSpeed = settings['institutionSpeed']
         self.accessSpeed = settings['accessSpeed']
     def arriveFifo(self,time, requestTime, fileId, fileSize):
-        self.fifoQueue.put((fileId, fileSize, requestTime))
-        self.eventQueue.put((time+fileSize/self.accessSpeed, self.departFifo)) #NOTE: this does not include additional arguments
+        self.fifoQueue.append((fileId, fileSize, requestTime))
+        if (self.fifoQueue): #Checks if fifoQueue is empty
+            self.eventQueue.put((time+fileSize/self.accessSpeed, self.departFifo, (requestTime))) 
         #TODO: handle when request is in Access Link FIFO
-    def departFifo(self,time):
-        file = self.fifoQueue.get() #File is (fileId,fileSize,requestTime)
-        requestTime = file[2]
+    def departFifo(self,time,requestTime):
+        f = self.fifoQueue.popleft() #File is (fileId,fileSize,requestTime)
+        requestTime = f[2]
+        fileSize = f[1]
         receiveTime = time + fileSize/self.institutionSpeed
         self.eventQueue.put((receiveTime, self.receiver.receivedEvent, (requestTime)))
+        if(not self.fifoQueue): #if queue is not empty
+            _, fileSize, requestTime = self.fifoQueue[0]
+            self.eventQueue.put((time+fileSize/self.accessSpeed,self.departFifo, (requestTime)))
 
 class Receiver: 
     def __init__(self, results):
@@ -106,6 +106,7 @@ results = [] #list of request, completed pairs
     
 
 #Variables
+totalRequests = 1000
 numberOfFiles = 10000
 reqPerSecond = 10
 a, m = 8/7,1/8
@@ -116,40 +117,23 @@ receiver = Receiver(results)
 eventQueue = PriorityQueue()
 accessLink = AccessLink(eventQueue,receiver, settings)
 cache = Cache(eventQueue,cacheSize,accessLink,receiver, settings)
+
 #r = RoundTrip(roundTripTime)
 
 #Generate fileset
 q = []
 a = 2
 b = 1/2
-for i in range(numberOfFiles-1):
+for i in range(numberOfFiles):
     q.append((np.random.pareto(a) + 1) * b)
 probSum = sum(q)
 fileProbabilities = np.array(q)/probSum
-for i in range(numberOfFiles-1):
+for i in range(numberOfFiles):
     fileSize = (np.random.pareto(a) + 1) * b
     files[i] = (fileSize,fileProbabilities[i])
 
 #Is the sum of probabilities 1?
-print(sum(fileProbabilities))
-
-#Let's graph the file sizes just to take a look
-x,y = zip(*files.items()) #I think we should use a different structure than
-y1 = []                   #a dict, it's just a bit awkward to work with
-for i in range(numberOfFiles-1):
-    y1.append(y[i][0])
-y1.sort()
-#plt.plot(x,y1)
-plt.hist(y1,bins=1000)
-
-#e1 = Event(0.5,1,1)
-#queue.put((e1.time,e1))
-
-#e2 = Event(0.25,1,1)
-#queue.put((e2.time,e2))
-
-#queue.get()
-
+print(f"Total File probability: {sum(fileProbabilities)}")
 
 def processQueue():
     event = eventQueue.get()
@@ -159,3 +143,12 @@ def processQueue():
         fun(time, *event[2]) 
     else:
         fun(time)
+
+#Lets fill the eventQueue
+for i in range(totalRequests):
+    fileId = np.random.choice(np.arange(numberOfFiles), p=fileProbabilities)
+    time = generateRequest(reqPerSecond)
+    event = (time, cache.checkCache, (fileId, fileSize[fileId])) #Format: (time, func, (func args))
+    eventQueue.put(event)
+
+
