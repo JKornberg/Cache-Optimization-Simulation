@@ -42,7 +42,7 @@ class RoundTrip:
 class Cache:
     fileIds = set() # list of fileIds
     used = 0
-    cacheQueue = Queue() # queue of (fileId,fileSize)
+    cacheQueue = deque() # queue of (fileId,fileSize)
     def __init__(self,eventQueue,size, accessLink, receiver, settings):
         self.eventQueue = eventQueue
         self.size = size
@@ -62,12 +62,12 @@ class Cache:
             
     def insert(self,fileId,fileSize):
         while(self.used + fileSize > self.size):
-            removed = self.cacheQueue.get()
+            removed = self.cacheQueue.popleft()
             self.used -= removed[1]
             self.fileIds.remove(removed[0])
         self.fileIds.add(fileId)
         self.used += fileSize
-        self.cacheQueue.put((fileId,fileSize))
+        self.cacheQueue.append((fileId,fileSize))
 
 class AccessLink:
     fifoQueue = deque() # holds (fileId, fileSize, requestTime)
