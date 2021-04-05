@@ -12,7 +12,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 from queue import PriorityQueue
 from collections import deque
-#from enum import Enum
+from enum import Enum
+
+
+class Policy(Enum):
+    FIFO = 0 #First in first out
+    LP = 1 #Least Popular
 
 #First in first out
 #Least recently used
@@ -39,18 +44,29 @@ class RoundTrip:
     
 
 class Cache:
-    fileIds = set() # list of fileIds
-    used = 0
-    cacheQueue = deque() # queue of (fileId,fileSize)
-    def __init__(self,eventQueue,size, accessLink, receiver, settings):
+    def __init__(self,eventQueue,size, accessLink, receiver, files, fileProbabilities, settings, policy=Policy.FIFO):
         self.eventQueue = eventQueue
         self.size = size
         self.accessLink = accessLink
         self.receiver = receiver
+        self.files = files
+        self.fileProbabilities = fileProbabilities
         self.institutionSpeed = settings['institutionSpeed']
         self.roundTripTime = settings['roundTripTime']
         self.requestPerSecond = settings['requestPerSecond']
         self.stopTime = settings['stopTime']
+        self.numberOfFiles = settings['numberOfFiles']
+        self.fileIds = set()
+        self.used = 0
+        self.cacheQueue = deque()
+        self.cacheQueue.clear()
+        self.popularity = {}
+        if not isinstance(policy, Policy):
+            self.policy = Policy.FIFO
+            print("Invalid policy, defaulting to FIFO")
+        else:
+            self.policy = policy
+
     def checkCache(self,time,fileId,fileSize):
         if fileId in self.fileIds:
             #(eventTime, function, (args))
@@ -62,29 +78,78 @@ class Cache:
         
     def createRequest(self,callTime):
         if(callTime < self.stopTime):
-            fileId = np.random.choice(np.arange(numberOfFiles), p=fileProbabilities)
+            fileId = np.random.choice(np.arange(self.numberOfFiles), p=self.fileProbabilities)
             time = np.random.exponential(1/self.requestPerSecond) + callTime
-            event = (time, self.checkCache, (fileId, files[fileId][0])) #Format: (time, func, (func args))
+            event = (time, self.checkCache, (fileId, self.files[fileId][0])) #Format: (time, func, (func args))
             self.eventQueue.put(event)
         
+    def replace(self, fileId,fileSize):
+        if (self.policy == Policy.FIFO):
+            self.replaceFIFO(fileId,fileSize)
+        elif (self.policy == Policy.LP):
+            self.replaceLeastPopular(fileId,fileSize)
+        else:
+            print("INVALID POLICY, NOT ADDING FILE")
+
+
     def replaceFIFO(self,fileId,fileSize):
+        if(fileId in self.fileIds): #If it was added before event executed
+            return
         while(self.used + fileSize > self.size):
+           # print(f"Replacing: {fileId}")
             removed = self.cacheQueue.popleft()
             self.used -= removed[1]
-            self.fileIds.remove(removed[0])
+            try:
+                self.fileIds.remove(removed[0])
+            except:
+                print(removed)
         self.fileIds.add(fileId)
         self.used += fileSize
         self.cacheQueue.append((fileId,fileSize))
 
+    def activeFile(self, item):
+        if item[0] in self.fileIds:
+            return True
+        return False
+
+    def replaceLeastPopular(self,fileId,fileSize):
+        if(fileId in self.fileIds): #If it was added before event executed
+            self.popularity[fileId][0] += 1
+            return
+        filtered = filter(self.activeFile, self.popularity.items())
+        sortedFiles = sorted(filtered, key=lambda x: x[1][0])
+        i = 0
+        if (fileSize > self.size):
+            print("FILE TOO LARGE FOR CACHE")
+        while (self.used + fileSize > self.size):
+            # print(f"Replacing: {fileId}")
+            removed = sortedFiles[i]
+            #print(f"Replacing: {removed[0], removed[1][0]}")
+
+            self.used -= removed[1][1]
+            self.fileIds.remove(removed[0])
+            i += 1
+        self.fileIds.add(fileId)
+        self.used += fileSize
+        if fileId in self.popularity:
+            self.popularity[fileId][0] += 1
+        else:
+            self.popularity[fileId] = [1,fileSize]
+    
+            
+
 class AccessLink:
-    cache = None
-    fifoQueue = deque() # holds (fileId, fileSize, requestTime)
+
     def __init__(self,eventQueue, receiver, settings):
         self.eventQueue = eventQueue
         self.receiver = receiver
         self.roundTripTime = settings['roundTripTime']
         self.institutionSpeed = settings['institutionSpeed']
         self.accessSpeed = settings['accessSpeed']
+        self.fifoQueue = deque()
+        self.fifoQueue.clear()
+        self.cache = None
+
     def arriveFifo(self,time, requestTime, fileId, fileSize):
         #print(f'arrive: {requestTime}')
         if (not self.fifoQueue): #Checks if fifoQueue is empty
@@ -98,7 +163,7 @@ class AccessLink:
         fileId = f[0]
         fileSize = f[1]
         requestTime = f[2]
-        cache.replaceFIFO(fileId,fileSize)
+        self.cache.replace(fileId,fileSize)
         receiveTime = time + fileSize/self.institutionSpeed
         self.eventQueue.put((receiveTime, self.receiver.receivedEvent, (requestTime,)))
         if(self.fifoQueue): #if queue is not empty
@@ -106,70 +171,120 @@ class AccessLink:
             self.eventQueue.put((time+fileSize/self.accessSpeed,self.departFifo, (requestTime,)))
 
 class Receiver: 
-    def __init__(self, requestTimes,turnaround):
-        self.requestTimes = requestTimes
-        self.turnaround = turnaround
+    def __init__(self):
+        self.requestTimes = np.array([])
+        self.turnaround =np.array([])
     def receivedEvent(self,time,requestTime):
         self.requestTimes = np.append(self.requestTimes,requestTime)
         self.turnaround = np.append(self.turnaround,time-requestTime)
 
-    
-requests = {} #
-files = {} #key value pairs of {fileId: (fileSize,fileProbability)}
-requestTimes = np.array([]) #list of requestTimes
-turnaround = np.array([])   #list of turnaround times, endtime - requestTime
+def runSimulation(policy=Policy.FIFO):
+    requests = {} #
+    files = {} #key value pairs of {fileId: (fileSize,fileProbability)}
+    #Variables
+    #totalRequests = 1000 #Replaced with stop time
+    a, m = 8/7,1/8
+    cacheSize = 1000 #Average file size is 1, so this is 20% of total files
+    numberOfFiles = 10000
+    results = []
+    settings = {'roundTripTime' : 0.4, 'institutionSpeed': 100, 
+                'accessSpeed' : 15, 'requestPerSecond' : 10,
+                'stopTime' : 100, 'numberOfFiles': numberOfFiles}
+
+        #Generate fileset
+    q = []
+    a = 2
+    b = 1/2
+    for i in range(numberOfFiles):
+        q.append((np.random.pareto(a) + 1) * b)
+    probSum = sum(q)
+    fileProbabilities = np.array(q)/probSum
+    for i in range(numberOfFiles):
+        fileSize = (np.random.pareto(a) + 1) * b
+        files[i] = (fileSize,fileProbabilities[i])
+
+    #Is the sum of probabilities 1?
+    #print(f"Total File probability: {sum(fileProbabilities)}")
+    receiver = Receiver()
+    eventQueue = PriorityQueue()
+    if (not eventQueue.empty):
+        print("BIG YIKES NOTE  MPTY")
+    accessLink = AccessLink(eventQueue,receiver, settings)
+    cache = Cache(eventQueue,cacheSize,accessLink,receiver, files, fileProbabilities,settings, policy=policy)
+    cache.fileIds.clear()
+    while not eventQueue.empty():
+        try:
+            eventQueue.get(False)
+        except Empty:
+            continue
+        eventQueue.task_done()
+
+    accessLink.cache = cache
+
+    #r = RoundTrip(roundTripTime)
 
 
-    
 
-#Variables
-#totalRequests = 1000 #Replaced with stop time
-numberOfFiles = 10000
-a, m = 8/7,1/8
-cacheSize = 2000 #Average file size is 1, so this is 20% of total files
-results = []
-settings = {'roundTripTime' : 0.4, 'institutionSpeed': 100, 
-            'accessSpeed' : 15, 'requestPerSecond' : 10,
-            'stopTime' : 100}
-receiver = Receiver(requestTimes,turnaround)
-eventQueue = PriorityQueue()
-accessLink = AccessLink(eventQueue,receiver, settings)
-cache = Cache(eventQueue,cacheSize,accessLink,receiver, settings)
-accessLink.cache = cache
+    def processQueue():
+        event = eventQueue.get()
+        time = event[0]
+        fun = event[1]
+        if (len(event) > 2):
+            fun(time, *event[2]) 
+        else:
+            fun(time)
 
-#r = RoundTrip(roundTripTime)
-
-#Generate fileset
-q = []
-a = 2
-b = 1/2
-for i in range(numberOfFiles):
-    q.append((np.random.pareto(a) + 1) * b)
-probSum = sum(q)
-fileProbabilities = np.array(q)/probSum
-for i in range(numberOfFiles):
-    fileSize = (np.random.pareto(a) + 1) * b
-    files[i] = (fileSize,fileProbabilities[i])
-
-#Is the sum of probabilities 1?
-print(f"Total File probability: {sum(fileProbabilities)}")
-
-def processQueue():
-    event = eventQueue.get()
-    time = event[0]
-    print(f'time: {time}')
-    fun = event[1]
-    if (len(event) > 2):
-        fun(time, *event[2]) 
-    else:
-        fun(time)
-
-#Create initial request
-cache.createRequest(0)
-#Run the simulation
-while(not eventQueue.empty()):
-    #Stop is based on time, after stoptime new requests aren't generated
-    processQueue()
+    #Create initial request
+    cache.createRequest(0)
+    #Run the simulation
+    while(not eventQueue.empty()):
+        #Stop is based on time, after stoptime new requests aren't generated
+        processQueue()
+    x, y = receiver.requestTimes, receiver.turnaround
+    del receiver
+    del cache
+    del eventQueue
+    del accessLink
+    return x, y
     
 #Evaluate results
-plt.scatter(receiver.requestTimes,receiver.turnaround)
+#plt.scatter(receiver.requestTimes,receiver.turnaround)
+#print(f"Average: {np.average(receiver.turnaround)}")
+
+
+
+
+
+
+
+
+plt.clf()
+
+print("***********************")
+
+fifoX = np.array([])
+fifoY = np.array([])
+for j in range(100):
+    fX, fY = runSimulation(policy=Policy.FIFO)
+    #print(np.sum(fY))
+    fifoX = np.append(fifoX, fX)
+    fifoY = np.append(fifoY, fY)
+print(f'Average fifo: {np.average(fifoY)}')
+plt.scatter(fifoX,fifoY)
+
+print("***********************")
+
+
+lX = np.array([])
+lY = np.array([])
+for j in range(100):
+    x, y = runSimulation(policy=Policy.LP)
+    #print(np.sum(y))
+    lX = np.append(lX, x)
+    lY = np.append(lY, y)
+print(f'Average LP: {np.average(lY)}')
+plt.scatter(lX,lY)
+
+print("***********************")
+
+#plt.scatter(lpX,lpY)
