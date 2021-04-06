@@ -18,6 +18,7 @@ from enum import Enum
 class Policy(Enum):
     FIFO = 0 #First in first out
     LP = 1 #Least Popular
+    BEST=2
 
 #First in first out
 #Least recently used
@@ -30,18 +31,7 @@ def generateRequest(mean):
     #Returns structure of
     return np.random.exponential(1/mean)
 
-#Generate files
-
-'''       
-class RoundTrip:
-    def __init__(self,speed, queue):
-        self.speed = speed
-        self.free = speed
-        self.queue = queue
-    def addTask(size):
-        if free < size:
-'''
-    
+#Generate files  
 
 class Cache:
     def __init__(self,eventQueue,size, accessLink, receiver, files, fileProbabilities, settings, policy=Policy.FIFO):
@@ -60,7 +50,7 @@ class Cache:
         self.used = 0
         self.cacheQueue = deque()
         self.cacheQueue.clear()
-        self.popularity = {}
+        self.popularity = {} #{fileId: (popularity, size)}
         if not isinstance(policy, Policy):
             self.policy = Policy.FIFO
             print("Invalid policy, defaulting to FIFO")
@@ -88,11 +78,16 @@ class Cache:
             self.replaceFIFO(fileId,fileSize)
         elif (self.policy == Policy.LP):
             self.replaceLeastPopular(fileId,fileSize)
+        elif (self.policy == Policy.BEST):
+            self.replaceBestFit(fileId,fileSize)
         else:
             print("INVALID POLICY, NOT ADDING FILE")
 
 
     def replaceFIFO(self,fileId,fileSize):
+        if (fileSize > self.size):
+            print("FILE TOO LARGE FOR CACHE")
+            return
         if(fileId in self.fileIds): #If it was added before event executed
             return
         while(self.used + fileSize > self.size):
@@ -121,14 +116,15 @@ class Cache:
         i = 0
         if (fileSize > self.size):
             print("FILE TOO LARGE FOR CACHE")
+            return 
         while (self.used + fileSize > self.size):
             # print(f"Replacing: {fileId}")
             removed = sortedFiles[i]
             #print(f"Replacing: {removed[0], removed[1][0]}")
-
             self.used -= removed[1][1]
             self.fileIds.remove(removed[0])
             i += 1
+
         self.fileIds.add(fileId)
         self.used += fileSize
         if fileId in self.popularity:
@@ -136,6 +132,34 @@ class Cache:
         else:
             self.popularity[fileId] = [1,fileSize]
     
+    def replaceBestFit(self,fileId,fileSize):
+        if(fileId in self.fileIds): #If it was added before event executed
+            return
+        filtered = filter(self.activeFile, self.popularity.items())
+        sortedFiles = sorted(filtered, key=lambda x: x[1][1], reverse=True)
+        i = 0
+        if (fileSize > self.size):
+            print("FILE TOO LARGE FOR CACHE")
+            return
+        enoughSpace = False
+        i = 0
+        while (self.used + fileSize > self.size):
+            if (sortedFiles[i][1][1] >= fileSize):
+                j = i + 1
+                while ( j < len(sortedFiles) and sortedFiles[j][1][1] >= fileSize):
+                    i = j
+                    j += 1
+                removed = sortedFiles[i]
+                self.used -= removed[1][1]
+                self.fileIds.remove(removed[0])
+            else:
+                removed = sortedFiles[i]
+                self.used -= removed[1][1]
+                self.fileIds.remove(removed[0])
+            i += 1
+        self.popularity[fileId] = [0,fileSize]
+        self.fileIds.add(fileId)
+        self.used += fileSize
             
 
 class AccessLink:
@@ -184,7 +208,7 @@ def runSimulation(policy=Policy.FIFO):
     #Variables
     #totalRequests = 1000 #Replaced with stop time
     a, m = 8/7,1/8
-    cacheSize = 1000 #Average file size is 1, so this is 20% of total files
+    cacheSize = 500 #Average file size is 1, so this is 20% of total files
     numberOfFiles = 10000
     results = []
     settings = {'roundTripTime' : 0.4, 'institutionSpeed': 100, 
@@ -208,17 +232,10 @@ def runSimulation(policy=Policy.FIFO):
     receiver = Receiver()
     eventQueue = PriorityQueue()
     if (not eventQueue.empty):
-        print("BIG YIKES NOTE  MPTY")
+        print("BIG YIKES NOT EMPTY")
     accessLink = AccessLink(eventQueue,receiver, settings)
     cache = Cache(eventQueue,cacheSize,accessLink,receiver, files, fileProbabilities,settings, policy=policy)
     cache.fileIds.clear()
-    while not eventQueue.empty():
-        try:
-            eventQueue.get(False)
-        except Empty:
-            continue
-        eventQueue.task_done()
-
     accessLink.cache = cache
 
     #r = RoundTrip(roundTripTime)
@@ -251,26 +268,22 @@ def runSimulation(policy=Policy.FIFO):
 #plt.scatter(receiver.requestTimes,receiver.turnaround)
 #print(f"Average: {np.average(receiver.turnaround)}")
 
-
-
-
-
-
-
-
 plt.clf()
+
+
+
 
 print("***********************")
 
 fifoX = np.array([])
 fifoY = np.array([])
-for j in range(100):
+for j in range(10):
     fX, fY = runSimulation(policy=Policy.FIFO)
     #print(np.sum(fY))
-    fifoX = np.append(fifoX, fX)
-    fifoY = np.append(fifoY, fY)
+    fifoX = np.append(fifoX, np.average(fX))
+    fifoY = np.append(fifoY, np.average(fY))
 print(f'Average fifo: {np.average(fifoY)}')
-plt.scatter(fifoX,fifoY)
+plt.scatter(np.arange(10),fifoY)
 
 print("***********************")
 
@@ -278,12 +291,12 @@ print("***********************")
 lX = np.array([])
 lY = np.array([])
 for j in range(100):
-    x, y = runSimulation(policy=Policy.LP)
+    x, y = runSimulation(policy=Policy.BEST)
     #print(np.sum(y))
-    lX = np.append(lX, x)
-    lY = np.append(lY, y)
-print(f'Average LP: {np.average(lY)}')
-plt.scatter(lX,lY)
+    lX = np.append(lX, np.average(x))
+    lY = np.append(lY, np.average(y))
+print(f'Average Best: {np.average(lY)}')
+plt.scatter(np.arange(100),lY)
 
 print("***********************")
 
