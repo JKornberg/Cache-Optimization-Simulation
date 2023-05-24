@@ -1,4 +1,4 @@
-# Jonah Kornberg 4/13/2021
+# Cache Optimization Simulation
 
 Full Report:
 https://drive.google.com/file/d/1xgbXWiKzZgHonwD_ZOCUkoltmTXoojJ9/view
